@@ -2,7 +2,6 @@
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
-using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Modules.Utils;
 
 namespace ImbalanceRespawnPlugin;
@@ -15,37 +14,37 @@ public class ImbalanceRespawnPlugin : BasePlugin
 	public override string ModuleAuthor => "murlis";
 	public override string ModuleVersion => "1.0.0";
 
+	private readonly GlobalObjects GlobalObjects;
+
+	private readonly ConVars ConVars = new();
+
 	private readonly Dictionary<CsTeam, int> TeamExtraLives = [];
-	private readonly (
-		Dictionary<CsTeam, ConVar> mp_respawn_on_death,
-		ConVar mp_randomspawn
-	) ConVars = (
-		new Dictionary<CsTeam, ConVar>() {
-				{ CsTeam.Terrorist, ConVar.Find("mp_respawn_on_death_t")! },
-				{ CsTeam.CounterTerrorist, ConVar.Find("mp_respawn_on_death_ct")! },
-		},
-		ConVar.Find("mp_randomspawn")!
-	);
-	private readonly GameRules GameRules = new();
+
+	public ImbalanceRespawnPlugin()
+	{
+		GlobalObjects = new(this);
+		foreach (var conVar in ConVars.RespawnOnDeath.Values) conVar.SetValue(false);
+	}
 
 	[GameEventHandler]
 	public HookResult OnRoundStart(EventRoundStart @event, GameEventInfo info)
 	{
 		TeamExtraLives.Clear();
-		foreach (var conVar in ConVars.mp_respawn_on_death.Values) conVar.SetValue(false);
+		foreach (var conVar in ConVars.RespawnOnDeath.Values) conVar.SetValue(false);
 		return HookResult.Continue;
 	}
 
 	[GameEventHandler]
 	public HookResult OnRoundFreezeEnd(EventRoundFreezeEnd @event, GameEventInfo info)
 	{
-		if (GameRules.Get().WarmupPeriod) return HookResult.Continue;
+		var gameRules = GlobalObjects.GameRules;
+		if (gameRules == null || gameRules.WarmupPeriod) return HookResult.Continue;
 
 		Dictionary<CsTeam, int> teamAliveCount = [];
 		foreach (var player in Utilities.GetPlayers())
 		{
 			if (!player.PawnIsAlive) continue;
-			if (player.Team == CsTeam.Spectator || player.Team == CsTeam.None) continue;
+			if (player.Team is CsTeam.Spectator or CsTeam.None) continue;
 			if (teamAliveCount.TryGetValue(player.Team, out int value)) teamAliveCount[player.Team] = value + 1;
 			else teamAliveCount[player.Team] = 1;
 		}
@@ -63,7 +62,7 @@ public class ImbalanceRespawnPlugin : BasePlugin
 			string.Join(", ", TeamExtraLives.Select(pair => $"{pair.Key}: {pair.Value}"))
 		);
 
-		foreach (var (team, conVar) in ConVars.mp_respawn_on_death)
+		foreach (var (team, conVar) in ConVars.RespawnOnDeath)
 		{
 			if (TeamExtraLives.GetValueOrDefault(team, 0) > 0) conVar.SetValue(true);
 		}
@@ -74,8 +73,8 @@ public class ImbalanceRespawnPlugin : BasePlugin
 	[GameEventHandler]
 	public HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo info)
 	{
-		var gameRules = GameRules.Get();
-		if (gameRules.WarmupPeriod || gameRules.FreezePeriod) return HookResult.Continue;
+		var gameRules = GlobalObjects.GameRules;
+		if (gameRules == null || gameRules.WarmupPeriod || gameRules.FreezePeriod) return HookResult.Continue;
 
 		var player = @event.Userid;
 		if (player == null || !player.IsValid) return HookResult.Continue;
@@ -93,7 +92,7 @@ public class ImbalanceRespawnPlugin : BasePlugin
 		});
 
 		TeamExtraLives[team] = --teamLives;
-		if (teamLives == 0) ConVars.mp_respawn_on_death[player.Team].SetValue(false);
+		if (teamLives == 0) ConVars.RespawnOnDeath[player.Team].SetValue(false);
 
 		return HookResult.Continue;
 	}
